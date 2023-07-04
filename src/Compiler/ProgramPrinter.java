@@ -1,18 +1,219 @@
 package Compiler;
+
 import gen.CListener;
 import gen.CParser;
 import org.antlr.v4.runtime.ParserRuleContext;
 import org.antlr.v4.runtime.tree.ErrorNode;
 import org.antlr.v4.runtime.tree.TerminalNode;
 
+import java.util.ArrayList;
+import java.util.List;
+
 public class ProgramPrinter implements CListener {
+
+    private int indent_level;
+    private final ArrayList<Scope> scopes;
+    private int nested_layer;
+
+    public ProgramPrinter() {
+        this.scopes = new ArrayList<>();
+        this.indent_level = 0;
+        this.nested_layer = 0;
+    }
+
+    public ArrayList<Scope> getScopes() {
+        return scopes;
+    }
+
+    private void indentation() {
+        for (int i = 0; i < indent_level; i++) {
+            System.out.print("    ");
+        }
+    }
+
+    private void startNestedStatement() {
+        indentation();
+        indent_level++;
+        System.out.println("nested statement: {");
+    }
+
+    private void stopNestedStatement() {
+        indent_level--;
+        indentation();
+        System.out.println("}");
+    }
+
+    //must be completed
+    private Scope getParentScope(ParserRuleContext ctx) {
+        Scope parent = null;
+        return parent;
+    }
+
     @Override
     public void enterExternalDeclaration(CParser.ExternalDeclarationContext ctx) {
         System.out.println("program start {");
+        indent_level++;
+
+        Scope scope = new Scope("program", ctx.start.getLine(), Type.PROGRAM, ctx.getRuleIndex());
+        scope.setParent(null);
+        scopes.add(scope);
     }
 
     @Override
     public void exitExternalDeclaration(CParser.ExternalDeclarationContext ctx) {
+        System.out.println("}");
+    }
+
+    @Override
+    public void enterPostfixExpression(CParser.PostfixExpressionContext ctx) {
+        if (ctx.LeftParen().size() != 0 && ctx.RightParen().size() != 0 && !ctx.primaryExpression().isEmpty() && !ctx.getText().contains("printf")) {
+            indentation();
+            System.out.print("function call: name: " + ctx.primaryExpression().getText());
+            //check arguments
+            if (!ctx.argumentExpressionList().isEmpty()) {
+                System.out.print("/ params: ");
+                List<CParser.AssignmentExpressionContext> arguments = ctx.argumentExpressionList().get(0).assignmentExpression();
+                for (int i = 0; i < arguments.size(); i++) {
+                    String parameter = arguments.get(i).getText();
+                    System.out.print(parameter + "(index: " + i + ") ");
+                }
+            }
+        }
+    }
+
+    @Override
+    public void exitPostfixExpression(CParser.PostfixExpressionContext ctx) {
+        if (ctx.LeftParen().size() != 0 && ctx.RightParen().size() != 0 && !ctx.primaryExpression().isEmpty()) {
+            System.out.println();
+        }
+    }
+
+    @Override
+    public void enterDeclaration(CParser.DeclarationContext ctx) {
+        if (!ctx.initDeclaratorList().isEmpty()) {
+            for (int i = 0; i < ctx.initDeclaratorList().initDeclarator().size(); i++) {
+                indentation();
+                String name = ctx.initDeclaratorList().initDeclarator(i).declarator().directDeclarator().Identifier().getText();
+                String type = ctx.declarationSpecifiers().getText();
+                int length = Integer.parseInt(ctx.initDeclaratorList().initDeclarator(i).declarator().directDeclarator().Constant().get(0).toString());
+                System.out.print("field: " + name + "/ type: " + type);
+                if (length > 0) {
+                    System.out.println("/ length: " + length);
+                } else {
+                    System.out.println();
+                }
+            }
+        }
+    }
+
+    @Override
+    public void enterParameterTypeList(CParser.ParameterTypeListContext ctx) {
+        indentation();
+        System.out.print("parameters list: (");
+    }
+
+    @Override
+    public void exitParameterTypeList(CParser.ParameterTypeListContext ctx) {
+        System.out.println(")");
+    }
+
+    @Override
+    public void enterParameterList(CParser.ParameterListContext ctx) {
+        for (int i = 0; i < ctx.parameterDeclaration().size(); i++) {
+            String type = ctx.parameterDeclaration(i).getChild(0).getText();
+            String name = ctx.parameterDeclaration(i).getChild(1).getText();
+            if (name.contains("[")) {
+                String[] str = ctx.parameterDeclaration(i).getChild(1).getText().split("\\[");
+                name = str[0];
+            }
+            System.out.print(type + " " + name);
+            if (i != ctx.parameterDeclaration().size() - 1) {
+                System.out.print(", ");
+            }
+        }
+    }
+
+    @Override
+    public void enterFunctionDefinition(CParser.FunctionDefinitionContext ctx) {
+        indentation();
+        String func_name = ctx.declarator().directDeclarator().directDeclarator().getText();
+        Scope scope = new Scope(func_name, ctx.start.getLine(), Type.FUNCTION, ctx.getRuleIndex());
+        scopes.add(scope);
+        System.out.println("normal method: name: " + func_name + "/ return type: " + ctx.getChild(0).getText() + " {");
+        indent_level++;
+
+
+    }
+
+    @Override
+    public void exitFunctionDefinition(CParser.FunctionDefinitionContext ctx) {
+        indent_level--;
+        indentation();
+        System.out.println("}");
+    }
+
+    @Override
+    public void enterMainfunctionDefinition(CParser.MainfunctionDefinitionContext ctx) {
+        indentation();
+        indent_level++;
+        Scope scope = new Scope("main", ctx.start.getLine(), Type.MAIN, ctx.getRuleIndex());
+        Scope parent = getParentScope(ctx);
+        scope.setParent(parent);
+        //error
+//        if (scopes.contains(scope)) {
+//            System.out.println("Error102 : in line " + scope.getScope_number() + ":" + scope.getIndex() + " , method " + scope.getName() + " has been defined already");
+//        }
+        System.out.print("main method: return type: " + ctx.getStart().getText());
+        if (ctx.getStart().getText().equals("void")) {
+            System.out.print("(no return)");
+        }
+        System.out.println(" {");
+    }
+
+    @Override
+    public void exitMainfunctionDefinition(CParser.MainfunctionDefinitionContext ctx) {
+        indent_level--;
+        indentation();
+        System.out.println("}");
+    }
+
+    @Override
+    public void enterSelectionStatement(CParser.SelectionStatementContext ctx) {
+        Scope scope = new Scope("Field", ctx.start.getLine(), Type.NESTED, ctx.getRuleIndex());
+        Scope parent = getParentScope(ctx);
+        scope.setParent(parent);
+        //error
+//        if (scopes.contains(scope)) {
+//            System.out.println("Error104 : in line " + scope.getScope_number() + ":" + scope.getIndex() + ", field " + scope.getName() + " has been defined already");
+//        }
+        nested_layer++;
+        if (nested_layer == 1) {
+            startNestedStatement();
+        }
+    }
+
+    @Override
+    public void exitSelectionStatement(CParser.SelectionStatementContext ctx) {
+        nested_layer--;
+        if (nested_layer == 1) {
+            stopNestedStatement();
+        }
+    }
+
+    @Override
+    public void enterIterationStatement(CParser.IterationStatementContext ctx) {
+        nested_layer++;
+        if (nested_layer == 1) {
+            startNestedStatement();
+        }
+    }
+
+    @Override
+    public void exitIterationStatement(CParser.IterationStatementContext ctx) {
+        nested_layer--;
+        if (nested_layer == 1) {
+            stopNestedStatement();
+        }
     }
 
     @Override
@@ -22,15 +223,6 @@ public class ProgramPrinter implements CListener {
 
     @Override
     public void exitPrimaryExpression(CParser.PrimaryExpressionContext ctx) {
-
-    }
-
-    @Override
-    public void enterPostfixExpression(CParser.PostfixExpressionContext ctx) {
-    }
-
-    @Override
-    public void exitPostfixExpression(CParser.PostfixExpressionContext ctx) {
 
     }
 
@@ -225,11 +417,6 @@ public class ProgramPrinter implements CListener {
     }
 
     @Override
-    public void enterDeclaration(CParser.DeclarationContext ctx) {
-
-    }
-
-    @Override
     public void exitDeclaration(CParser.DeclarationContext ctx) {
 
     }
@@ -241,7 +428,6 @@ public class ProgramPrinter implements CListener {
 
     @Override
     public void exitDeclarationSpecifiers(CParser.DeclarationSpecifiersContext ctx) {
-
     }
 
     @Override
@@ -276,7 +462,6 @@ public class ProgramPrinter implements CListener {
 
     @Override
     public void enterInitDeclarator(CParser.InitDeclaratorContext ctx) {
-
     }
 
     @Override
@@ -495,21 +680,6 @@ public class ProgramPrinter implements CListener {
     }
 
     @Override
-    public void enterParameterTypeList(CParser.ParameterTypeListContext ctx) {
-
-    }
-
-    @Override
-    public void exitParameterTypeList(CParser.ParameterTypeListContext ctx) {
-
-    }
-
-    @Override
-    public void enterParameterList(CParser.ParameterListContext ctx) {
-
-    }
-
-    @Override
     public void exitParameterList(CParser.ParameterListContext ctx) {
 
     }
@@ -665,26 +835,6 @@ public class ProgramPrinter implements CListener {
     }
 
     @Override
-    public void enterSelectionStatement(CParser.SelectionStatementContext ctx) {
-
-    }
-
-    @Override
-    public void exitSelectionStatement(CParser.SelectionStatementContext ctx) {
-
-    }
-
-    @Override
-    public void enterIterationStatement(CParser.IterationStatementContext ctx) {
-
-    }
-
-    @Override
-    public void exitIterationStatement(CParser.IterationStatementContext ctx) {
-
-    }
-
-    @Override
     public void enterForCondition(CParser.ForConditionContext ctx) {
 
     }
@@ -724,25 +874,6 @@ public class ProgramPrinter implements CListener {
 
     }
 
-    @Override
-    public void enterFunctionDefinition(CParser.FunctionDefinitionContext ctx) {
-
-    }
-
-    @Override
-    public void exitFunctionDefinition(CParser.FunctionDefinitionContext ctx) {
-
-    }
-
-    @Override
-    public void enterMainfunctionDefinition(CParser.MainfunctionDefinitionContext ctx) {
-
-    }
-
-    @Override
-    public void exitMainfunctionDefinition(CParser.MainfunctionDefinitionContext ctx) {
-
-    }
 
     @Override
     public void enterDeclarationList(CParser.DeclarationListContext ctx) {

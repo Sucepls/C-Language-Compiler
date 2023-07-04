@@ -1,4 +1,4 @@
-package gen;// Generated from C:/Users/Sucepls/IdeaProjects/Compoiler/grammer\C.g4 by ANTLR 4.12.0
+// Generated from C:/Users/Sucepls/IdeaProjects/compiler/grammer\C.g4 by ANTLR 4.12.0
 import org.antlr.v4.runtime.tree.ParseTreeListener;
 
 /**
