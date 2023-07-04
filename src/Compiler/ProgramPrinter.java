@@ -49,6 +49,20 @@ public class ProgramPrinter implements CListener {
         return parent;
     }
 
+    String getParamType(CParser.ParameterDeclarationContext ctx){
+
+        String par_type = ctx.declarationSpecifiers().getText();
+        var paramLength = ctx.declarator().directDeclarator().Constant().size();
+
+        if(paramLength > 0) {
+            var length = ctx.declarator().directDeclarator().Constant().get(0).getText();
+            return String.format("array_%s, length= %s" , par_type , length);
+        }
+        else {
+            return String.format("%s" , par_type);
+        }
+    }
+
     @Override
     public void enterExternalDeclaration(CParser.ExternalDeclarationContext ctx) {
         System.out.println("program start {");
@@ -139,9 +153,19 @@ public class ProgramPrinter implements CListener {
         String func_name = ctx.declarator().directDeclarator().directDeclarator().getText();
         Scope scope = new Scope(func_name, ctx.start.getLine(), Type.FUNCTION, ctx.getRuleIndex());
         scopes.add(scope);
+        var param = ctx.declarator().directDeclarator().parameterTypeList().parameterList().parameterDeclaration();
+        String name = null;
+        String type = null;
+        if (param != null){
+            for (int i=0; i<param.size(); i++){
+                name = param.get(i).declarator().directDeclarator().Identifier().getText();
+                type = getParamType(param.get(i));
+                String value = String.format("methodParamField(name: %s) (type: %s)", name, type);
+                scope.insert("Field_" + name, new SymbolTableItem(ctx.start.getLine(), value));
+            }
+        }
         System.out.println("normal method: name: " + func_name + "/ return type: " + ctx.getChild(0).getText() + " {");
         indent_level++;
-
 
     }
 
@@ -157,12 +181,34 @@ public class ProgramPrinter implements CListener {
         indentation();
         indent_level++;
         Scope scope = new Scope("main", ctx.start.getLine(), Type.MAIN, ctx.getRuleIndex());
-        Scope parent = getParentScope(ctx);
-        scope.setParent(parent);
-        //error
-//        if (scopes.contains(scope)) {
-//            System.out.println("Error102 : in line " + scope.getScope_number() + ":" + scope.getIndex() + " , method " + scope.getName() + " has been defined already");
-//        }
+        scopes.add(scope);
+        var param = ctx.compoundStatement().blockItemList().blockItem();
+        String name = null;
+        String type = null;
+        int length = 0;
+        if (param != null){
+            for (int i=0; i<param.size(); i++){
+                if (ctx.compoundStatement().blockItemList().blockItem(i).declaration() != null){
+                    type = ctx.compoundStatement().blockItemList().blockItem(i).declaration().declarationSpecifiers().declarationSpecifier(i).typeSpecifier().getText();
+                    if (ctx.compoundStatement().blockItemList().blockItem(i).declaration().initDeclaratorList() != null){
+                        var paramdec =ctx.compoundStatement().blockItemList().blockItem(i).declaration().initDeclaratorList().initDeclarator();
+                        name = ctx.compoundStatement().blockItemList().blockItem(i).declaration().initDeclaratorList().initDeclarator().get(0).declarator().directDeclarator().Identifier().getText();
+                    }
+                    if (ctx.compoundStatement().blockItemList().blockItem(i).declaration().initDeclaratorList().initDeclarator(0).declarator().directDeclarator().LeftBracket().size() > 0) {
+                        length = Integer.parseInt(ctx.compoundStatement().blockItemList().blockItem(i).declaration().initDeclaratorList().initDeclarator(0).declarator().directDeclarator().Constant().get(0).getText());
+                    }
+                    String key = "Field_" + name;
+                    String value = null;
+                    if (length == 0)
+                        value = String.format("methodField(name: %s) (type: %s)", name, type);
+                    else
+                        value = String.format("methodField(name: %s) (type: %s array, length= %d)", name, type, length);
+                    scope.insert(key, new SymbolTableItem(ctx.compoundStatement().blockItemList().blockItem(i).start.getLine(), value));
+                    length = 0;
+
+                }
+            }
+        }
         System.out.print("main method: return type: " + ctx.getStart().getText());
         if (ctx.getStart().getText().equals("void")) {
             System.out.print("(no return)");
