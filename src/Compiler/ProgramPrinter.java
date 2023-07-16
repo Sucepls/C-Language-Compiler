@@ -3,17 +3,23 @@ package Compiler;
 import gen.CListener;
 import gen.CParser;
 import org.antlr.v4.runtime.ParserRuleContext;
+import org.antlr.v4.runtime.RuleContext;
 import org.antlr.v4.runtime.tree.ErrorNode;
 import org.antlr.v4.runtime.tree.TerminalNode;
 
-import java.util.ArrayList;
-import java.util.List;
+
+import java.util.*;
 
 public class ProgramPrinter implements CListener {
 
     private int indent_level;
+
+    private final ArrayList<String> ErorrList = new ArrayList<>();
+
+    private final ArrayList<Integer> return_line = new ArrayList<>();
     private final ArrayList<Scope> scopes;
     private int nested_layer;
+    int counter;
 
     public ProgramPrinter() {
         this.scopes = new ArrayList<>();
@@ -21,8 +27,13 @@ public class ProgramPrinter implements CListener {
         this.nested_layer = 0;
     }
 
-    public ArrayList<Scope> getScopes() {
-        return scopes;
+    public void printScopes() {
+        for (Scope scope : scopes
+        ) {
+            System.out.println(scope.toString());
+            System.out.println("================================================================");
+            System.out.println();
+        }
     }
 
     private void indentation() {
@@ -43,23 +54,26 @@ public class ProgramPrinter implements CListener {
         System.out.println("}");
     }
 
-    //must be completed
-    private Scope getParentScope(ParserRuleContext ctx) {
-        Scope parent = null;
-        return parent;
+    private Scope getScope(String name, int line) {
+        for (Scope scope : scopes
+        ) {
+            if (scope.getName().equals(name) && scope.getScope_number() == line) {
+                return scope;
+            }
+        }
+        return null;
     }
 
-    String getParamType(CParser.ParameterDeclarationContext ctx){
+    String getParamType(CParser.ParameterDeclarationContext ctx) {
 
         String par_type = ctx.declarationSpecifiers().getText();
         var paramLength = ctx.declarator().directDeclarator().Constant().size();
 
-        if(paramLength > 0) {
+        if (paramLength > 0) {
             var length = ctx.declarator().directDeclarator().Constant().get(0).getText();
-            return String.format("array_%s, length= %s" , par_type , length);
-        }
-        else {
-            return String.format("%s" , par_type);
+            return String.format("array_%s, length= %s", par_type, length);
+        } else {
+            return String.format("%s", par_type);
         }
     }
 
@@ -71,27 +85,81 @@ public class ProgramPrinter implements CListener {
         Scope scope = new Scope("program", ctx.start.getLine(), Type.PROGRAM, ctx.getRuleIndex());
         scope.setParent(null);
         scopes.add(scope);
+
+        //main method declaration
+        String main_method_name = "Method_main";
+        String main_method_value = String.format("Method (name : main) (return type: %s)", ctx.mainfunctionDefinition().declarationSpecifiers().declarationSpecifier(0).typeSpecifier().getText());
+        SymbolTableItem main_symbolTableItem = new SymbolTableItem(ctx.mainfunctionDefinition().start.getLine(), main_method_value);
+        scope.insert(main_method_name, main_symbolTableItem);
+
+        //normal method declaration
+        for (int i = 0; i < ctx.functionDefinition().size(); i++) {
+            String normal_method_name = ctx.functionDefinition().get(i).declarator().directDeclarator().directDeclarator().Identifier().getText();
+            String normal_method_type = ctx.functionDefinition().get(i).declarationSpecifiers().declarationSpecifier(0).typeSpecifier().getText();
+            String normal_method_value = String.format("Method (name : %s) (return type: %s)", normal_method_name, normal_method_type);
+            if (ctx.functionDefinition().get(i).declarator().directDeclarator().parameterTypeList() != null) {
+                String paramerters = "";
+                var parameters_list = ctx.functionDefinition().get(i).declarator().directDeclarator().parameterTypeList().parameterList().parameterDeclaration();
+                for (int j = 0; j < parameters_list.size(); j++) {
+                    String type = parameters_list.get(j).declarationSpecifiers().declarationSpecifier(0).getText();
+                    if (parameters_list.get(j).declarator().directDeclarator().LeftBracket().size() != 0) {
+                        type += " array";
+                    }
+                    paramerters += "[type: " + type + ", index: " + j + "]";
+                    if (j < parameters_list.size() - 1) {
+                        paramerters += ", ";
+                    }
+                }
+                normal_method_value += paramerters;
+            }
+            if (!scope.Contain("Method_" + normal_method_name)) {
+                scope.insert("Method_" + normal_method_name, new SymbolTableItem(ctx.start.getLine(), normal_method_value));
+            } else {
+                ErorrList.add(String.format("Error102 : in line [%d:%d] , method [%s] has been defined already", ctx.functionDefinition().get(i).start.getLine(), ctx.functionDefinition().get(i).start.getCharPositionInLine(), normal_method_name));
+                scope.insert("Method_" + normal_method_name + "_" + ctx.functionDefinition().get(i).start.getLine() + "_" + ctx.functionDefinition().get(i).start.getCharPositionInLine(), new SymbolTableItem(ctx.functionDefinition().get(i).start.getLine(), normal_method_value));
+            }
+        }
     }
 
     @Override
     public void exitExternalDeclaration(CParser.ExternalDeclarationContext ctx) {
         System.out.println("}");
+        System.out.println();
+        printScopes();
+        for (String s : ErorrList) {
+            System.out.println(s);
+            System.out.println();
+        }
     }
 
     @Override
     public void enterPostfixExpression(CParser.PostfixExpressionContext ctx) {
+        if (ctx.primaryExpression().Identifier() != null && ctx.LeftParen().isEmpty()) {
+            if (!scopes.get(scopes.size() - 1).Contain("Field_" + ctx.primaryExpression().getText())) {
+                ErorrList.add(String.format("Error106 : in line [%d:%d], Can not find Variable [%s]", ctx.start.getLine(), ctx.start.getCharPositionInLine(), ctx.primaryExpression().getText()));
+            }
+        }
         if (ctx.LeftParen().size() != 0 && ctx.RightParen().size() != 0 && !ctx.primaryExpression().isEmpty() && !ctx.getText().contains("printf")) {
             indentation();
-            System.out.print("function call: name: " + ctx.primaryExpression().getText());
-            //check arguments
-            if (!ctx.argumentExpressionList().isEmpty()) {
-                System.out.print("/ params: ");
-                List<CParser.AssignmentExpressionContext> arguments = ctx.argumentExpressionList().get(0).assignmentExpression();
-                for (int i = 0; i < arguments.size(); i++) {
-                    String parameter = arguments.get(i).getText();
-                    System.out.print(parameter + "(index: " + i + ") ");
+            if (!scopes.get(scopes.size() - 1).Contain("Field_" + ctx.primaryExpression().getText())) {
+                ErorrList.add(String.format("Error106 : in line [%d:%d], Can not find Variable [%s]", ctx.start.getLine(), ctx.start.getCharPositionInLine(), ctx.primaryExpression().getText()));
+            } else {
+                System.out.print("function call: name: " + ctx.primaryExpression().getText());
+                //check arguments
+                if (!ctx.argumentExpressionList().isEmpty()) {
+                    System.out.print("/ params: ");
+                    List<CParser.AssignmentExpressionContext> arguments = ctx.argumentExpressionList().get(0).assignmentExpression();
+                    for (int i = 0; i < arguments.size(); i++) {
+                        String parameter = arguments.get(i).getText();
+                        System.out.print(parameter + "(index: " + i + ") ");
+                    }
                 }
             }
+        }
+        if (ctx.primaryExpression().Identifier() != null && !ctx.LeftParen().isEmpty()) {
+            Scope scope = null;
+            int arg2 = 0;
+            boolean checked = true;
         }
     }
 
@@ -104,18 +172,20 @@ public class ProgramPrinter implements CListener {
 
     @Override
     public void enterDeclaration(CParser.DeclarationContext ctx) {
-        if (!ctx.initDeclaratorList().isEmpty()) {
+        if (ctx.initDeclaratorList() != null && !ctx.initDeclaratorList().isEmpty()) {
             for (int i = 0; i < ctx.initDeclaratorList().initDeclarator().size(); i++) {
                 indentation();
                 String name = ctx.initDeclaratorList().initDeclarator(i).declarator().directDeclarator().Identifier().getText();
                 String type = ctx.declarationSpecifiers().getText();
-                int length = Integer.parseInt(ctx.initDeclaratorList().initDeclarator(i).declarator().directDeclarator().Constant().get(0).toString());
-                System.out.print("field: " + name + "/ type: " + type);
-                if (length > 0) {
-                    System.out.println("/ length: " + length);
-                } else {
-                    System.out.println();
+                int length = 0;
+                if (ctx.initDeclaratorList().initDeclarator(i).declarator().directDeclarator().Constant().size() > 0) {
+                    length = Integer.parseInt(ctx.initDeclaratorList().initDeclarator(i).declarator().directDeclarator().Constant().get(0).toString());
                 }
+                String result = "field: " + name + "/ type: " + type;
+                if (length > 0) {
+                    result += "/ length: " + length;
+                }
+                System.out.println(result);
             }
         }
     }
@@ -152,21 +222,87 @@ public class ProgramPrinter implements CListener {
         indentation();
         String func_name = ctx.declarator().directDeclarator().directDeclarator().getText();
         Scope scope = new Scope(func_name, ctx.start.getLine(), Type.FUNCTION, ctx.getRuleIndex());
-        scopes.add(scope);
-        var param = ctx.declarator().directDeclarator().parameterTypeList().parameterList().parameterDeclaration();
-        String name = null;
-        String type = null;
-        if (param != null){
-            for (int i=0; i<param.size(); i++){
-                name = param.get(i).declarator().directDeclarator().Identifier().getText();
-                type = getParamType(param.get(i));
-                String value = String.format("methodParamField(name: %s) (type: %s)", name, type);
-                scope.insert("Field_" + name, new SymbolTableItem(ctx.start.getLine(), value));
+        for (int i = scopes.size() - 2; i >= 0; i--) {
+            if (scopes.get(i).getScope_type() == Type.PROGRAM) {
+                scope.setParent(scopes.get(i));
+                scopes.get(i).getChildern().add(scope);
+                break;
             }
         }
+        scopes.add(scope);
+
+        //fields
+        try {
+            var param = ctx.declarator().directDeclarator().parameterTypeList().parameterList().parameterDeclaration();
+            String name = null;
+            String type = null;
+            if (param != null) {
+                for (CParser.ParameterDeclarationContext parameterDeclarationContext : param) {
+                    name = parameterDeclarationContext.declarator().directDeclarator().Identifier().getText();
+                    type = getParamType(parameterDeclarationContext);
+                    String value = String.format("methodParamField(name: %s) (type: %s)", name, type);
+                    if (!scope.Contain("Field_" + name)) {
+                        SymbolTableItem symbolTableItem = new SymbolTableItem(ctx.start.getLine(), value);
+                        scope.insert("Field_" + name, symbolTableItem);
+                    } else {
+                        ErorrList.add(String.format("Error104 : in line [%d:%d] , field [%s] has been defined already", ctx.start.getLine(), ctx.start.getCharPositionInLine(), "Field_" + name));
+                        scope.insert("Field_" + name + "_" + ctx.start.getLine() + "_" + ctx.start.getCharPositionInLine(), new SymbolTableItem(ctx.start.getLine(), value));
+                    }
+                }
+            }
+        }catch (Exception e){
+            System.out.println();
+        }
+
+        //method fields
+        String field_name = null;
+        String field_type = null;
+        int field_length = 0;
+        try {
+            var block_list = ctx.compoundStatement().blockItemList().blockItem();
+            for (CParser.BlockItemContext blockItemContext : block_list) {
+                field_length = 0;
+                if (blockItemContext.declaration() != null) {
+                    var declaration = blockItemContext.declaration().declarationSpecifiers().declarationSpecifier();
+                    if (blockItemContext.declaration().initDeclaratorList() != null) {
+                        var init_declaration = blockItemContext.declaration().initDeclaratorList().initDeclarator();
+                        field_name = init_declaration.get(0).declarator().directDeclarator().Identifier().getText();
+                        if (init_declaration.get(0).declarator().directDeclarator().LeftBracket().size() > 0) {
+                            field_length = Integer.parseInt(init_declaration.get(0).declarator().directDeclarator().Constant().get(0).getText());
+                        }
+                    }
+                    else if (blockItemContext.declaration().declarationSpecifiers().declarationSpecifier(1).typeSpecifier().typedefName().getText() != null) {
+                        field_name = blockItemContext.declaration().declarationSpecifiers().declarationSpecifier(1).typeSpecifier().typedefName().getText();
+                    }
+
+//                    find type
+                    for (CParser.DeclarationSpecifierContext declarationSpecifierContext : declaration) {
+                        var type_specifier = declarationSpecifierContext.typeSpecifier();
+                        field_type = type_specifier.getText();
+                        break;
+                    }
+                }
+
+                String method_field_value;
+                if (field_length == 0)
+                    method_field_value = String.format("methodField(name: %s) (type: %s)", field_name, field_type);
+                else
+                    method_field_value = String.format("methodField(name: %s) (type: %s array, length= %d)", field_name, field_type, field_length);
+
+                if (!scope.Contain("Field_" + field_name)) {
+                    SymbolTableItem symbolTableItem = new SymbolTableItem(ctx.start.getLine(), method_field_value);
+                    scope.insert("Field_" + field_name, symbolTableItem);
+                } else {
+                    ErorrList.add(String.format("Error104 : in line [%d:%d] , field [%s] has been defined already", ctx.start.getLine(), ctx.start.getCharPositionInLine(), "Field_" + field_name));
+                    scope.insert("Field_" + field_name + "_" + ctx.start.getLine() + "_" + ctx.start.getCharPositionInLine(), new SymbolTableItem(ctx.start.getLine(), method_field_value));
+                }
+            }
+        }catch (Exception e){
+            System.out.println();
+        }
+
         System.out.println("normal method: name: " + func_name + "/ return type: " + ctx.getChild(0).getText() + " {");
         indent_level++;
-
     }
 
     @Override
@@ -181,32 +317,51 @@ public class ProgramPrinter implements CListener {
         indentation();
         indent_level++;
         Scope scope = new Scope("main", ctx.start.getLine(), Type.MAIN, ctx.getRuleIndex());
+        //set program as the parent of main
+        for (Scope s : scopes
+        ) {
+            if (s.getScope_number() == 1) {
+                scope.setParent(s);
+                scopes.get(1).getChildern().add(scope);
+                break;
+            }
+        }
         scopes.add(scope);
         var param = ctx.compoundStatement().blockItemList().blockItem();
         String name = null;
         String type = null;
         int length = 0;
-        if (param != null){
-            for (int i=0; i<param.size(); i++){
-                if (ctx.compoundStatement().blockItemList().blockItem(i).declaration() != null){
-                    type = ctx.compoundStatement().blockItemList().blockItem(i).declaration().declarationSpecifiers().declarationSpecifier(i).typeSpecifier().getText();
-                    if (ctx.compoundStatement().blockItemList().blockItem(i).declaration().initDeclaratorList() != null){
-                        var paramdec =ctx.compoundStatement().blockItemList().blockItem(i).declaration().initDeclaratorList().initDeclarator();
-                        name = ctx.compoundStatement().blockItemList().blockItem(i).declaration().initDeclaratorList().initDeclarator().get(0).declarator().directDeclarator().Identifier().getText();
-                    }
-                    if (ctx.compoundStatement().blockItemList().blockItem(i).declaration().initDeclaratorList().initDeclarator(0).declarator().directDeclarator().LeftBracket().size() > 0) {
-                        length = Integer.parseInt(ctx.compoundStatement().blockItemList().blockItem(i).declaration().initDeclaratorList().initDeclarator(0).declarator().directDeclarator().Constant().get(0).getText());
-                    }
-                    String key = "Field_" + name;
-                    String value = null;
-                    if (length == 0)
-                        value = String.format("methodField(name: %s) (type: %s)", name, type);
-                    else
-                        value = String.format("methodField(name: %s) (type: %s array, length= %d)", name, type, length);
-                    scope.insert(key, new SymbolTableItem(ctx.compoundStatement().blockItemList().blockItem(i).start.getLine(), value));
-                    length = 0;
-
+        if (param != null) {
+            for (int i = 0; i < param.size(); i++) {
+                if (param.get(i).statement() != null && param.get(i).statement().expressionStatement() != null) {
+                    name = param.get(i).statement().expressionStatement().start.getText();
                 }
+                if (param.get(i).declaration() != null) {
+                    type = param.get(i).declaration().declarationSpecifiers().declarationSpecifier(0).typeSpecifier().getText();
+                    if (param.get(i).declaration().initDeclaratorList() != null) {
+                        var paramdec = param.get(i).declaration().initDeclaratorList().initDeclarator();
+                        name = param.get(i).declaration().initDeclaratorList().initDeclarator().get(0).declarator().directDeclarator().Identifier().getText();
+                    }
+                    if (param.get(i).declaration().initDeclaratorList() != null && param.get(i).declaration().initDeclaratorList().initDeclarator(0).declarator().directDeclarator().LeftBracket().size() > 0
+                            && param.get(i).declaration().initDeclaratorList().initDeclarator(0).declarator().directDeclarator().Constant().size() > 0) {
+//                        length = Integer.parseInt(param.get(i).declaration().initDeclaratorList().initDeclarator(0).declarator().directDeclarator().Constant().get(0).getText());
+                        length = Integer.parseInt(param.get(i).declaration().initDeclaratorList().initDeclarator(0).declarator().directDeclarator().Constant(0).getText());
+                    }
+                }
+                String value = null;
+                if (length == 0)
+                    value = String.format("methodField(name: %s) (type: %s)", name, type);
+                else
+                    value = String.format("methodField(name: %s) (type: %s array, length= %d)", name, type, length);
+
+                if (!scope.Contain("Field_" + name)) {
+                    SymbolTableItem symbolTableItem = new SymbolTableItem(ctx.start.getLine(), value);
+                    scope.insert("Field_" + name, symbolTableItem);
+                } else {
+                    ErorrList.add(String.format("Error104 : in line [%d:%d] , field [%s] has been defined already", ctx.start.getLine(), ctx.start.getCharPositionInLine(), "Field_" + name));
+                    scope.insert("Field_" + name + "_" + ctx.start.getLine() + "_" + ctx.start.getCharPositionInLine(), new SymbolTableItem(ctx.start.getLine(), value));
+                }
+                length = 0;
             }
         }
         System.out.print("main method: return type: " + ctx.getStart().getText());
@@ -225,17 +380,76 @@ public class ProgramPrinter implements CListener {
 
     @Override
     public void enterSelectionStatement(CParser.SelectionStatementContext ctx) {
-        Scope scope = new Scope("Field", ctx.start.getLine(), Type.NESTED, ctx.getRuleIndex());
-        Scope parent = getParentScope(ctx);
-        scope.setParent(parent);
-        //error
-//        if (scopes.contains(scope)) {
-//            System.out.println("Error104 : in line " + scope.getScope_number() + ":" + scope.getIndex() + ", field " + scope.getName() + " has been defined already");
-//        }
-        nested_layer++;
-        if (nested_layer == 1) {
-            startNestedStatement();
+        if (counter >= 1) {
+            Scope scope = new Scope("nested", ctx.start.getLine(), Type.NESTED, ctx.getRuleIndex());
+            int k;
+            if (nested_layer == 0)
+                k = scopes.size() - 1;
+            else
+                k = scopes.size() - 2;
+            for (; k >= 0; k--) {
+                if (scopes.get(k).getScope_type() == Type.FUNCTION || scopes.get(k).getScope_type() == Type.MAIN) {
+                    scope.setParent(scopes.get(k));
+                    scopes.get(k).getChildern().add(scope);
+                    break;
+                }
+            }
+            scopes.add(scope);
+
+            String field_name = null;
+            String field_type = null;
+            int field_length = 0;
+            try {
+                var statements = ctx.statement();
+                if (statements != null) {
+                    for (int i = 0; i < statements.size(); i++) {
+                        var item = statements.get(i).compoundStatement().blockItemList().blockItem();
+                        for (CParser.BlockItemContext blockItemContext : item) {
+//                        System.out.println("*******" + item.get(j).getText());
+                            field_type = blockItemContext.start.getText();
+//                    field_name=item.get(j).children.get(0).getChild(1).getText();
+                            if (blockItemContext.declaration() != null) {
+                                //find details of method fields
+                                var declaration = item.get(i).declaration().declarationSpecifiers().declarationSpecifier();
+                                if (item.get(i).declaration().initDeclaratorList() != null) {
+                                    var init_declaration = item.get(i).declaration().initDeclaratorList().initDeclarator();
+                                    field_name = init_declaration.get(0).declarator().directDeclarator().Identifier().getText();
+                                    if (init_declaration.get(0).declarator().directDeclarator().LeftBracket().size() > 0) {
+                                        field_length = Integer.parseInt(init_declaration.get(0).declarator().directDeclarator().Constant().get(0).getText());
+                                    }
+                                }
+                                //find type
+                                for (CParser.DeclarationSpecifierContext declarationSpecifierContext : declaration) {
+                                    var type_specifier = declarationSpecifierContext.typeSpecifier();
+                                    field_type = type_specifier.getText();
+                                    break;
+                                }
+                                String key = "Field_" + field_name;
+                                String value = "";
+                                if (field_length == 0)
+                                    value = String.format("methodField(name: %s) (type: %s)", field_name, field_type);
+                                else
+                                    value = String.format("methodField(name: %s) (type: %s array, length= %d)", field_name, field_type, field_length);
+                                if (!scope.Contain(key)) {
+                                    scope.insert(key, new SymbolTableItem(ctx.start.getLine(), value));
+                                } else {
+                                    ErorrList.add(String.format("Error102 : in line [%d:%d] , field [%s] has been defined already", ctx.start.getLine(), ctx.start.getCharPositionInLine(), key));
+                                    scope.insert(key + "_" + ctx.start.getLine() + "_" + ctx.start.getCharPositionInLine(), new SymbolTableItem(ctx.start.getLine(), value));
+                                }
+                                field_length = 0;
+                            }
+                        }
+                    }
+            }
+                nested_layer++;
+                if (nested_layer == 1) {
+                    startNestedStatement();
+                }
+            }catch (Exception e){
+                System.out.println();
+            }
         }
+        counter++;
     }
 
     @Override
@@ -248,10 +462,67 @@ public class ProgramPrinter implements CListener {
 
     @Override
     public void enterIterationStatement(CParser.IterationStatementContext ctx) {
-        nested_layer++;
-        if (nested_layer == 1) {
-            startNestedStatement();
+        if (counter >= 1) {
+            Scope scope = new Scope("nested", ctx.start.getLine(), Type.NESTED, ctx.getRuleIndex());
+            int k;
+            if (nested_layer == 0)
+                k = scopes.size() - 1;
+            else
+                k = scopes.size() - 2;
+            for (; k >= 0; k--) {
+                if (scopes.get(k).getScope_type() == Type.FUNCTION || scopes.get(k).getScope_type() == Type.MAIN) {
+                    scope.setParent(scopes.get(k));
+                    scopes.get(k).getChildern().add(scope);
+                    break;
+                }
+            }
+            scopes.add(scope);
+
+            String field_name = null;
+            String field_type = null;
+            int field_length = 0;
+            var list = ctx.statement().compoundStatement().blockItemList().blockItem();
+            if (list != null) {
+                for (CParser.BlockItemContext blockItemContext : list)
+                    if (blockItemContext.declaration() != null) {
+                        //find details of method fields
+                        var declaration = blockItemContext.declaration().declarationSpecifiers().declarationSpecifier();
+                        if (blockItemContext.declaration().initDeclaratorList() != null) {
+                            var init_declaration = blockItemContext.declaration().initDeclaratorList().initDeclarator();
+                            field_name = init_declaration.get(0).declarator().directDeclarator().Identifier().getText();
+                            if (init_declaration.get(0).declarator().directDeclarator().LeftBracket().size() > 0) {
+                                field_length = Integer.parseInt(init_declaration.get(0).declarator().directDeclarator().Constant().get(0).getText());
+                            }
+                        }
+                        //find type
+                        for (CParser.DeclarationSpecifierContext declarationSpecifierContext : declaration) {
+                            var type_specifier = declarationSpecifierContext.typeSpecifier();
+                            field_type = type_specifier.getText();
+                            break;
+                        }
+
+                        String key = "Field_" + field_name;
+                        String value = "";
+                        if (field_length == 0)
+                            value = String.format("methodField(name: %s) (type: %s)", field_name, field_type);
+                        else
+                            value = String.format("methodField(name: %s) (type: %s array, length= %d)", field_name, field_type, field_length);
+                        if (!scope.Contain(key)) {
+                            scope.insert(key, new SymbolTableItem(ctx.start.getLine(), value));
+                        } else {
+                            ErorrList.add(String.format("Error102 : in line [%d:%d] , field [%s] has been defined already", ctx.start.getLine(), ctx.start.getCharPositionInLine(), key));
+                            scope.insert(key + "_" + ctx.start.getLine() + "_" + ctx.start.getCharPositionInLine(), new SymbolTableItem(ctx.start.getLine(), value));
+                        }
+                        field_length = 0;
+                    }
+            }
+
+            nested_layer++;
+            if (nested_layer == 1) {
+                startNestedStatement();
+            }
         }
+        counter++;
     }
 
     @Override
@@ -264,9 +535,7 @@ public class ProgramPrinter implements CListener {
 
     @Override
     public void enterPrimaryExpression(CParser.PrimaryExpressionContext ctx) {
-
     }
-
     @Override
     public void exitPrimaryExpression(CParser.PrimaryExpressionContext ctx) {
 

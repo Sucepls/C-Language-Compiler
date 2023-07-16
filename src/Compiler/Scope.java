@@ -1,5 +1,6 @@
 package Compiler;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -10,6 +11,7 @@ public class Scope {
     private final int scope_number;
     private final Type scope_type;
     private Scope parent;
+    private ArrayList<Scope> childern;
 
     public Scope(String name, int scope_number, Type scope_type, int index) {
         this.name = name;
@@ -17,6 +19,7 @@ public class Scope {
         this.scope_type = scope_type;
         this.index = index;
         this.symbol_table = new LinkedHashMap<>();
+        this.childern = new ArrayList<>();
     }
 
     public String getName() {
@@ -43,9 +46,18 @@ public class Scope {
         this.parent = parent;
     }
 
+    public void addChild(Scope scope) {
+        this.childern.add(scope);
+    }
+
+    public ArrayList<Scope> getChildern() {
+        return childern;
+    }
+
     public void insert(String Key, SymbolTableItem Value) {
         symbol_table.put(Key, Value);
     }
+
     public SymbolTableItem lookup(String Key) {
         return symbol_table.get(Key);
     }
@@ -68,5 +80,26 @@ public class Scope {
             itemsStr.append("Key = ").append(entry.getKey()).append(" | Value = ").append(entry.getValue()).append("\n");
         }
         return itemsStr.toString();
+    }
+
+    public boolean Contain(String idefName) {
+        Scope scope = this;
+        while (scope != null) {
+            if (scope.scope_type != Type.PROGRAM) {
+                for (Scope scope1 : scope.getChildern()) {
+                    if (scope1.lookup(idefName) != null) {
+                        return true;
+                    }
+                }
+            }
+            if (scope.lookup(idefName) != null) {
+                return true;
+            }
+            scope = scope.parent;
+        }
+        return false;
+    }
+    public LinkedHashMap<String, SymbolTableItem> getHashtable() {
+        return symbol_table;
     }
 }
